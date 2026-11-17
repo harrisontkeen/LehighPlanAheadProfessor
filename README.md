@@ -2,20 +2,20 @@
 
 [Chrome Web Store listing!](https://chromewebstore.google.com/detail/lehighplanaheadprofessor/alogfakffcehkcbmjnhaakneglknpodk?utm_source=item-share-cb)
 
-Chrome extension showing Rate My Professors information in Lehigh University's Plan Ahead.
+Chrome extension showing Rate My Professors information in Lehigh University's Banner registration pages: Plan Ahead, Browse Classes and Register for Classes.
 
 Thanks to Uttej Mannava and Mohammad Mahfooz for the inspiration!
 
 ## Features
 
-- **Professor Ratings**: Displays professor ratings directly in Plan Ahead.
-- **Interactive Tooltips**: Hover over professor scores to see detailed information, including average ratings, difficulty scores, top tags, the most helpful review, and a direct link to the professor's full profile.
+- **Professor Ratings**: Displays professor ratings next to each instructor in Plan Ahead, Browse Classes and Register for Classes.
+- **Interactive Tooltips**: Hover over professor scores to see detailed information, including average ratings, difficulty scores, top tags, the most helpful review, and a direct link to the professor's full profile. Click a rating to open the professor's RateMyProfessors page.
   
 Please verify all professor information before making final course selections. While I strived for accuracy, rating data may contain errors or be outdated. Users are responsible for confirming their course schedules
 
 ## Stack
 
-The extension uses two JavaScript files to integrate RateMyProfessors data into Lehigh University's course registration system. The background script fetches data from RateMyProfessors.com's GraphQL API to bypass CORS restrictions and handles professor name matching across different formats. The content script scans course pages for instructor information and creates interactive rating badges with tooltips that display professor ratings, difficulty, and reviews. The system automatically detects new course content and provides real-time rating integration without page reloads.
+The extension uses two JavaScript files to integrate RateMyProfessors data into Lehigh University's course registration system. The background script fetches data from RateMyProfessors.com's GraphQL API to bypass CORS restrictions and handles professor name matching across different formats. The content script scans Banner's results grids for instructor information and creates interactive rating badges with tooltips that display professor ratings, difficulty, and reviews. The system automatically detects new course content and provides real-time rating integration without page reloads.
 
 ## Screenshots
 

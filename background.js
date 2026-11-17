@@ -1,278 +1,183 @@
-//Background Script - Adapted from WesternRMP
+// LehighRMP Background Script - Adapted from WesternRMP
+// Fetches RateMyProfessors data here (not in the page) to avoid CORS.
 
 const GRAPHQL_URL = 'https://www.ratemyprofessors.com/graphql';
-const LEHIGH_SCHOOL_ID = '509'; // Lehigh University's RMP ID
+const LEHIGH_SCHOOL_ID = btoa('School-509'); // Lehigh University's RMP ID
 const AUTH_TOKEN = 'Basic dGVzdDp0ZXN0';
+const CACHE_TTL_MS = 30 * 60 * 1000;
 
-// Convert professor name format for better search results
-const convertProfessorName = (professorName) => {
-    if (!professorName || typeof professorName !== 'string') {
-        return '';
-    }
-    
-    const cleaned = professorName.trim().replace(/\(Primary\)/i, '').trim();
-    console.log(`Converting name: "${cleaned}"`);
-    
-    // Handle "Last, First Middle" format (like "Asante-Appiah, Bright")
-    if (cleaned.includes(',')) {
-        const [last, firstMiddle] = cleaned.split(',').map(s => s.trim());
-        const firstParts = firstMiddle.split(' ').filter(p => p.length > 0);
-        if (firstParts.length > 0) {
-            // Keep the full hyphenated last name
-            const converted = `${firstParts[0]} ${last}`;
-            console.log(`Converted comma format: "${cleaned}" -> "${converted}"`);
-            return converted;
-        }
-    }
-    
-    // Handle "First Last" format (like "Tang Leo" when displayed as "Leo Tang")
-    const parts = cleaned.split(' ').filter(p => p.length > 0);
-    if (parts.length >= 2) {
-        const firstName = parts[0];
-        const lastName = parts.slice(1).join(' '); // Join all parts after first as last name (handles hyphenated names)
-        const converted = `${firstName} ${lastName}`;
-        console.log(`Converted space format: "${cleaned}" -> "${converted}"`);
-        return converted;
-    }
-    
-    console.log(`No conversion needed: "${cleaned}"`);
-    return cleaned;
-};
-
-// Encode school ID to base64 with "School-" prefix
-function encodeToBase64(str) {
-    if (!str || typeof str !== 'string') {
-        return '';
-    }
-    str = 'School-'.concat(str);
-    return btoa(str);
-}
-
-// Filter professor results to find best match
-const filterProfessorResults = (edges, professorName, targetDepartment) => {
-    console.log(`Filtering results for: "${professorName}"`);
-    console.log(`Available professors:`, edges.map(e => `${e.node.firstName} ${e.node.lastName}`));
-    
-    const nameParts = professorName.trim().split(/\s+/);
-    if (nameParts.length < 2) return null;
-    
-    const searchFirstName = nameParts[0].toLowerCase();
-    const searchLastName = nameParts.slice(1).join(' ').toLowerCase(); // Handle hyphenated last names
-    
-    console.log(`Looking for: First="${searchFirstName}", Last="${searchLastName}"`);
-    
-    let nameMatches = edges.filter(edge => {
-        const professor = edge.node;
-        const profFirstName = professor.firstName?.toLowerCase() || '';
-        const profLastName = professor.lastName?.toLowerCase() || '';
-        
-        console.log(`Checking: "${profFirstName}" "${profLastName}"`);
-        
-        // Check first name match (exact, starts with, or initial)
-        const firstNameMatch = 
-            profFirstName === searchFirstName ||
-            profFirstName.startsWith(searchFirstName) ||
-            searchFirstName.startsWith(profFirstName) ||
-            (searchFirstName.length === 1 && profFirstName.startsWith(searchFirstName));
-        
-        // Check last name match (exact, contains, or handles hyphenated names)
-        const lastNameMatch = 
-            profLastName === searchLastName ||
-            profLastName.includes(searchLastName) ||
-            searchLastName.includes(profLastName) ||
-            // Handle hyphenated names by checking individual parts
-            (searchLastName.includes('-') && searchLastName.split('-').some(part => 
-                profLastName.includes(part) || part.includes(profLastName)
-            )) ||
-            (profLastName.includes('-') && profLastName.split('-').some(part => 
-                searchLastName.includes(part) || part.includes(searchLastName)
-            ));
-        
-        const isMatch = firstNameMatch && lastNameMatch;
-        console.log(`Match result: first=${firstNameMatch}, last=${lastNameMatch}, overall=${isMatch}`);
-        
-        return isMatch;
-    });
-    
-    console.log(`Found ${nameMatches.length} name matches`);
-    
-    if (nameMatches.length === 1) {
-        return nameMatches[0];
-    }
-    
-    // If multiple matches, try to filter by department
-    if (nameMatches.length > 1 && targetDepartment) {
-        console.log(`Filtering by department: "${targetDepartment}"`);
-        const deptMatches = nameMatches.filter(edge => {
-            const profDept = edge.node.department?.toLowerCase() || '';
-            const targetDept = targetDepartment.toLowerCase();
-            return profDept.includes(targetDept) || targetDept.includes(profDept);
-        });
-        if (deptMatches.length > 0) {
-            console.log(`Found department match`);
-            return deptMatches[0];
-        }
-    }
-    
-    const result = nameMatches.length > 0 ? nameMatches[0] : null;
-    console.log(`Final result:`, result ? `${result.node.firstName} ${result.node.lastName}` : 'null');
-    return result;
-};
-
-const searchProfessor = async (professorName, schoolID, targetDepartment) => {
-    const query = `query NewSearchTeachersQuery(
-    $query: TeacherSearchQuery!) {
-        newSearch {
-            teachers(query: $query) {
-                didFallback
-                edges {
-                    cursor
-                    node {
-                        id
-                        legacyId
-                        firstName
-                        lastName
-                        avgRatingRounded
-                        numRatings
-                        wouldTakeAgainPercentRounded
-                        wouldTakeAgainCount
-                        teacherRatingTags {
-                            id
-                            legacyId
-                            tagCount
-                            tagName
-                        }
-                        mostUsefulRating {
-                            id
-                            class
-                            isForOnlineClass
-                            legacyId
-                            comment
-                            helpfulRatingRounded
-                            ratingTags
-                            grade
-                            date
-                            iWouldTakeAgain
-                            qualityRating
-                            difficultyRatingRounded
-                            teacherNote{
-                                id
-                                comment
-                                createdAt
-                                class
-                            }
-                            thumbsDownTotal
-                            thumbsUpTotal
-                        }
-                        avgDifficultyRounded
-                        school {
-                            name
-                            id
-                        }
-                        department
+const SEARCH_QUERY = `query NewSearchTeachersQuery($query: TeacherSearchQuery!) {
+    newSearch {
+        teachers(query: $query) {
+            didFallback
+            edges {
+                node {
+                    id
+                    legacyId
+                    firstName
+                    lastName
+                    avgRatingRounded
+                    numRatings
+                    wouldTakeAgainPercentRounded
+                    wouldTakeAgainCount
+                    teacherRatingTags {
+                        tagCount
+                        tagName
                     }
+                    mostUsefulRating {
+                        class
+                        comment
+                        date
+                        qualityRating
+                    }
+                    avgDifficultyRounded
+                    school {
+                        name
+                        id
+                    }
+                    department
                 }
             }
         }
-    }`;
-    
-    try {
-        console.log(`Searching for professor: ${professorName} in ${targetDepartment}`);
-        
-        const response = await fetch(GRAPHQL_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': AUTH_TOKEN,
-                'Accept': 'application/json',
-                'Origin': 'https://www.ratemyprofessors.com'
-            },
-            body: JSON.stringify({
-                query: query,
-                variables: {
-                    query: {
-                        text: convertProfessorName(professorName),
-                        schoolID: schoolID
-                    }
-                }
-            })
-        });
-        
-        if (!response.ok) {
-            console.error(`API request failed with status: ${response.status}`);
-            return null;
-        }
-        
-        const data = await response.json();
-        
-        if (!data || !data.data) {
-            console.error('API response missing data property:', data);
-            return null;
-        }
-        
-        if (!data.data.newSearch || !data.data.newSearch.teachers) {
-            console.error('API response missing newSearch.teachers:', data.data);
-            return null;
-        }
-        
-        const edges = data.data.newSearch.teachers.edges;
-        console.log("API response:", edges);
-        
-        if (edges.length === 0) {
-            console.log(`No results found for professor: ${professorName}`);
-            return null;
-        }
-        
-        const professor = filterProfessorResults(edges, convertProfessorName(professorName), targetDepartment);
-        console.log(`Found professor data:`, professor);
-        return professor;
-
-    } catch (error) {
-        console.error('Error searching for professor:', error);
-        return null;
     }
+}`;
+
+// Banner shows "Last, First Middle (Primary)". RMP searches best with "First Last".
+const parseBannerName = (rawName) => {
+    const cleaned = (rawName || '').replace(/\(primary\)/i, '').replace(/\s+/g, ' ').trim();
+    if (cleaned.includes(',')) {
+        const [last, rest = ''] = cleaned.split(',').map(s => s.trim());
+        const first = rest.split(' ').filter(Boolean)[0] || '';
+        return { first, last };
+    }
+    const parts = cleaned.split(' ').filter(Boolean);
+    return { first: parts[0] || '', last: parts.slice(1).join(' ') };
+};
+
+const normalize = (s) => (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z' -]/g, '')
+    .trim();
+
+const firstNameMatches = (searchFirst, profFirst) => {
+    if (!searchFirst || !profFirst) return false;
+    return profFirst === searchFirst ||
+        profFirst.startsWith(searchFirst) ||
+        searchFirst.startsWith(profFirst);
+};
+
+const lastNameMatches = (searchLast, profLast) => {
+    if (!searchLast || !profLast) return false;
+    if (profLast === searchLast) return true;
+    // Hyphenated or multi-part last names: any shared part counts.
+    const searchParts = searchLast.split(/[\s-]+/).filter(p => p.length > 1);
+    const profParts = profLast.split(/[\s-]+/).filter(p => p.length > 1);
+    return searchParts.some(p => profParts.includes(p));
+};
+
+const pickBestMatch = (edges, { first, last }, department) => {
+    const searchFirst = normalize(first);
+    const searchLast = normalize(last);
+
+    const matches = edges
+        .map(e => e.node)
+        .filter(n => n && n.school && n.school.id === LEHIGH_SCHOOL_ID)
+        .filter(n => lastNameMatches(searchLast, normalize(n.lastName)) &&
+                     firstNameMatches(searchFirst, normalize(n.firstName)));
+
+    if (matches.length <= 1) return matches[0] || null;
+
+    // Several candidates: prefer the department match, then the most-rated profile.
+    const dept = normalize(department);
+    if (dept) {
+        const deptMatch = matches.find(n => {
+            const d = normalize(n.department);
+            return d && (d.includes(dept) || dept.includes(d));
+        });
+        if (deptMatch) return deptMatch;
+    }
+    return matches.sort((a, b) => (b.numRatings || 0) - (a.numRatings || 0))[0];
+};
+
+const runSearch = async (text) => {
+    const response = await fetch(GRAPHQL_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': AUTH_TOKEN,
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+            query: SEARCH_QUERY,
+            variables: { query: { text, schoolID: LEHIGH_SCHOOL_ID } }
+        })
+    });
+    if (!response.ok) {
+        throw new Error(`RateMyProfessors request failed with status ${response.status}`);
+    }
+    const json = await response.json();
+    if (json.errors && json.errors.length) {
+        throw new Error(`RateMyProfessors error: ${json.errors[0].message}`);
+    }
+    return json?.data?.newSearch?.teachers?.edges || [];
+};
+
+const searchProfessor = async (professorName, department) => {
+    const name = parseBannerName(professorName);
+    if (!name.first || !name.last) return null;
+
+    let match = pickBestMatch(await runSearch(`${name.first} ${name.last}`), name, department);
+    if (!match) {
+        // RMP may list a nickname ("Bob" for "Robert"): retry on last name alone,
+        // and accept only a single same-initial result.
+        const edges = await runSearch(name.last);
+        const candidates = edges
+            .map(e => e.node)
+            .filter(n => n && n.school && n.school.id === LEHIGH_SCHOOL_ID)
+            .filter(n => normalize(n.lastName) === normalize(name.last) &&
+                         normalize(n.firstName)[0] === normalize(name.first)[0]);
+        if (candidates.length === 1) match = candidates[0];
+    }
+    return match;
+};
+
+// Cache by name so a results page with 50 sections doesn't fire 50 identical requests.
+const cache = new Map();
+
+const cachedSearch = (professorName, department) => {
+    const key = `${professorName}|${department || ''}`.toLowerCase();
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.time < CACHE_TTL_MS) return hit.promise;
+
+    const promise = searchProfessor(professorName, department);
+    cache.set(key, { time: Date.now(), promise });
+    promise.catch(() => cache.delete(key)); // don't cache network failures
+    return promise;
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log("Background received message:", message);
-    
-    if (message.action === "searchProfessor") {
-        const { professorName, schoolID = encodeToBase64(LEHIGH_SCHOOL_ID), department } = message;
-        console.log(`Processing search request for: ${professorName}, department: ${department}`);
-        
-        if (!professorName) {
-            console.error("Missing professor name in request");
-            sendResponse({ success: false, error: "Professor name is required" });
-            return true;
-        }
-        
-        searchProfessor(professorName, schoolID, department)
-            .then(professorData => {
-                if (professorData) {
-                    console.log(`Sending successful response for ${professorName}`);
-                    sendResponse({ success: true, professor: professorData });
-                } else {
-                    console.log(`Professor not found: ${professorName}`);
-                    sendResponse({ 
-                        success: false, 
-                        error: "Professor not found",
-                        searchTerm: professorName,
-                        convertedName: convertProfessorName(professorName)
-                    });
-                }
-            })
-            .catch(error => {
-                console.error(`Error in searchProfessor for ${professorName}:`, error);
-                sendResponse({ 
-                    success: false, 
-                    error: "Error searching for professor: " + error.message 
-                });
-            });
-        
-        return true; // indicates we send a response asynchronously
-    }
-    
-    return false;
-});
+    if (message?.action !== 'searchProfessor') return false;
 
-console.log("LehighRMP Background script loaded, listening.");
+    const { professorName, department } = message;
+    if (!professorName) {
+        sendResponse({ success: false, error: 'Professor name is required' });
+        return false;
+    }
+
+    cachedSearch(professorName, department)
+        .then(professor => {
+            if (professor) {
+                sendResponse({ success: true, professor: { node: professor } });
+            } else {
+                sendResponse({ success: false, notFound: true, error: 'Professor not found' });
+            }
+        })
+        .catch(error => {
+            console.error(`LehighRMP: lookup failed for ${professorName}:`, error);
+            sendResponse({ success: false, error: error.message });
+        });
+
+    return true; // respond asynchronously
+});
